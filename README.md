@@ -143,4 +143,10 @@ int main() {
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Komal-ai417/minidb/issues).
 
 ## 📝 License
-This project is licensed strictly under the [MIT License](LICENSE).
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+```text
+MIT License
+Copyright (c) 2026 Komal-ai417
+```
