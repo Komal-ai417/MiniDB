@@ -54,8 +54,8 @@ MiniDB is self-contained. It compiles instantly utilizing any modern C++ toolcha
 
 ```bash
 # Clone the repository
-git clone https://github.com/Komal-ai417/minidb.git
-cd minidb
+git clone https://github.com/Komal-ai417/MiniDB.git
+cd MiniDB
 
 # Compile the testing suite (Custom dependency-free tests)
 g++ -std=c++11 -I./include src/MiniDB.cpp tests/test_minidb.cpp -o test_minidb
@@ -136,3 +136,4 @@ int main() {
 
 ## 📝 License
 This project is licensed under the MIT License.
+
