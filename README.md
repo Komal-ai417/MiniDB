@@ -15,10 +15,10 @@ Built entirely using the **C++ Standard Library (STL) and File I/O**, it operate
 
 ## ⚡ Key Engineering Achievements
 
-- ✔️ **O(1) Latency**: Engineered a persistent NoSQL database from scratch using an append-only, log-structured merge (LSM) approach, guaranteeing constant-time O(1) write performance.
-- ✔️ **Optimized Retrieval**: Optimized read queries using an in-memory Hash Index, successfully bypassing slow random-access disk seeks to achieve O(1) retrieval time for millions of records.
-- ✔️ **Crash-Safe Compaction**: Implemented an automated background compaction process to reclaim disk space from old versions and deleted records without data loss during intermittent power or system failures.
-- ✔️ **Custom Binary Protocol**: Designed a rigorous binary protocol equipped with magic bytes (`MDB1`) and CRC32 checksums, immediately detecting file corruption or incomplete writes to ensure stringent data integrity.
+- **O(1) Latency**: Engineered a persistent NoSQL database from scratch using an append-only, log-structured merge (LSM) approach, guaranteeing constant-time O(1) write performance.
+- **Optimized Retrieval**: Optimized read queries using an in-memory Hash Index, successfully bypassing slow random-access disk seeks to achieve O(1) retrieval time for millions of records.
+- **Crash-Safe Compaction**: Implemented an automated background compaction process to reclaim disk space from old versions and deleted records without data loss during intermittent power or system failures.
+- **Custom Binary Protocol**: Designed a rigorous binary protocol equipped with magic bytes (`MDB1`) and CRC32 checksums, immediately detecting file corruption or incomplete writes to ensure stringent data integrity.
 
 ---
 
