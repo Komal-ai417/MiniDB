@@ -25,7 +25,7 @@ Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant
 
 ---
 
-## 🏗 Deep-Dive: Storage Architecture
+## Deep-Dive: Storage Architecture
 
 ### Append-Only Log Mechanics vs. B-Trees
 Traditional relational databases (B-Trees) utilize in-place updates, which critically degrade performance on rotational or slow media due to heavy random disk I/O penalties. **MiniDB treats the database natively as an infinite append-only log.** All operations—whether new insertions or overriding updates—are simply appended sequentially to the very end of the file.
