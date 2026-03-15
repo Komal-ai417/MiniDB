@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
-MiniDB is a highly-optimized, lightweight, and persistent NoSQL key-value store engineered from scratch in **C++**. 
+MiniDB is a highly-optimized, lightweight, and persistent NoSQL key-value store engineered from scratch in **C++**.
 By embracing a Log-Structured Merge (LSM) architectural design pattern and an in-memory Hash Index, MiniDB achieves unparalleled **O(1) read and write performance**, effortlessly scaling to millions of records. 
 
 Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant File I/O**, it operates with **absolute zero external dependencies**, establishing a robust, easily-embeddable database engine.
