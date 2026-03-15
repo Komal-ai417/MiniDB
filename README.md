@@ -15,7 +15,7 @@ Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant
 
 ---
 
-## ⚡ Key Engineering Achievements
+## Key Engineering Achievements
 
 - **Zero-Allocation I/O Pipeline**: Architected a one-shot batched File I/O system minimizing expensive kernel context switches. Validated with a Zero-Allocation CRC32 Lookup Table (LUT) hashing strategy utilizing explicit memory addresses, avoiding all heap/`std::vector` allocations per query.
 - **O(1) Latency Guarantee**: Specifically designed around an append-only log paradigm, preventing random-disk seeks. Every `Put` or `Delete` operation is executed as a constant-time sequential disk write.
@@ -48,7 +48,7 @@ Every stored attribute is strictly packed byte-by-byte into the file stream util
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Build Instructions
 
@@ -102,7 +102,7 @@ minidb> exit
 
 ---
 
-## 💻 Embed into your C++ Project
+## Embed into your C++ Project
 
 If you need a blazing-fast, lightweight NoSQL store dynamically bolted into your C++ application, initializing `MiniDB` takes three lines of code:
 
@@ -139,10 +139,10 @@ int main() {
 
 ---
 
-## 🤝 Contributions
+## Contributions
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Komal-ai417/minidb/issues).
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
