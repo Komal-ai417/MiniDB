@@ -8,24 +8,25 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
-MiniDB is a highly-optimized, lightweight, and persistent NoSQL key-value store engineered from scratch in **C++**.
+MiniDB is a highly-optimized, lightweight, and persistent NoSQL key-value store engineered from scratch in **C++**. 
 By embracing a Log-Structured Merge (LSM) architectural design pattern and an in-memory Hash Index, MiniDB achieves unparalleled **O(1) read and write performance**, effortlessly scaling to millions of records. 
 
 Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant File I/O**, it operates with **absolute zero external dependencies**, establishing a robust, easily-embeddable database engine.
 
 ---
 
-## Key Engineering Achievements
+## ⚡ Key Engineering Achievements
 
 - **Zero-Allocation I/O Pipeline**: Architected a one-shot batched File I/O system minimizing expensive kernel context switches. Validated with a Zero-Allocation CRC32 Lookup Table (LUT) hashing strategy utilizing explicit memory addresses, avoiding all heap/`std::vector` allocations per query.
+- **Lock-Free Thread Safety**: Engineered a custom internal `SpinLock` strictly utilizing C++11 `std::atomic_flag` memory fences to guarantee 100% thread-safety across concurrent access without injecting POSIX `<mutex>` external constraints.
 - **O(1) Latency Guarantee**: Specifically designed around an append-only log paradigm, preventing random-disk seeks. Every `Put` or `Delete` operation is executed as a constant-time sequential disk write.
 - **Optimized Hash Retrieval**: Bypassed traditional disk indexing by maintaining a live Hash Directory mapped directly to exact disk offsets, achieving true O(1) data retrieval times.
 - **Resilient Crash Recovery**: Automated background file scanning with byte-level precision. In the event of system power failure, corrupted blocks or torn-writes are dynamically identified via `MDB1` Magic Bytes and truncated automatically without compromising the unified dataset.
-- **Live Compaction Garbage Collection**: Implemented a transactional space-reclamation engine that asynchronously compacts the active database, gracefully purging outdated keys and tombstones (deleted records) ensuring a minimal disk footprint.
+- **Live Compaction & Atomic Rollbacks**: Built a garbage collection engine that safely compacts the database, gracefully purging outdated keys. The engine utilizes protective `.bak` file tracking to execute flawless atomic rollbacks, making the architecture completely bulletproof against data-loss during mid-compaction system failures.
 
 ---
 
-## Deep-Dive: Storage Architecture
+## 🏗 Deep-Dive: Storage Architecture
 
 ### Append-Only Log Mechanics vs. B-Trees
 Traditional relational databases (B-Trees) utilize in-place updates, which critically degrade performance on rotational or slow media due to heavy random disk I/O penalties. **MiniDB treats the database natively as an infinite append-only log.** All operations—whether new insertions or overriding updates—are simply appended sequentially to the very end of the file.
@@ -48,7 +49,7 @@ Every stored attribute is strictly packed byte-by-byte into the file stream util
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Build Instructions
 
@@ -102,7 +103,7 @@ minidb> exit
 
 ---
 
-## Embed into your C++ Project
+## 💻 Embed into your C++ Project
 
 If you need a blazing-fast, lightweight NoSQL store dynamically bolted into your C++ application, initializing `MiniDB` takes three lines of code:
 
@@ -139,10 +140,10 @@ int main() {
 
 ---
 
-## Contributions
+## 🤝 Contributions
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Komal-ai417/minidb/issues).
 
-## License
+## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
