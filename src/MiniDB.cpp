@@ -29,6 +29,7 @@ MiniDB::MiniDB(const std::string& db_path) : db_path_(db_path) {
 }
 
 MiniDB::~MiniDB() {
+    LockGuard<SpinLock> lock(db_mutex_);
     if (data_file_.is_open()) {
         data_file_.flush();
         data_file_.close();
@@ -100,6 +101,7 @@ bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool
 }
 
 bool MiniDB::Put(const std::string& key, const std::string& value) {
+    LockGuard<SpinLock> lock(db_mutex_);
     std::streampos offset;
     if (AppendRecord(key, value, false, offset)) {
         key_dir_[key] = offset;
@@ -109,6 +111,7 @@ bool MiniDB::Put(const std::string& key, const std::string& value) {
 }
 
 bool MiniDB::Delete(const std::string& key) {
+    LockGuard<SpinLock> lock(db_mutex_);
     if (key_dir_.find(key) == key_dir_.end()) {
         return false; // Key not found
     }
@@ -123,6 +126,7 @@ bool MiniDB::Delete(const std::string& key) {
 }
 
 bool MiniDB::Get(const std::string& key, std::string& value) {
+    LockGuard<SpinLock> lock(db_mutex_);
     auto it = key_dir_.find(key);
     if (it == key_dir_.end()) {
         return false;
@@ -166,6 +170,7 @@ bool MiniDB::Get(const std::string& key, std::string& value) {
 }
 
 bool MiniDB::Recover() {
+    LockGuard<SpinLock> lock(db_mutex_);
     data_file_.clear();
     data_file_.seekg(0, std::ios::beg);
 
@@ -236,6 +241,8 @@ bool MiniDB::Compact() {
         return false;
     }
 
+    LockGuard<SpinLock> lock(db_mutex_);
+
     // Iterate over active keys
     for (const auto& pair : key_dir_) {
         const std::string& key = pair.first;
@@ -274,12 +281,24 @@ bool MiniDB::Compact() {
     compact_file.close();
     data_file_.close();
 
-    // Atomic rename approximation using standard C functionality
-    std::remove(db_path_.c_str());
-    int rename_err = std::rename(compact_file_path.c_str(), db_path_.c_str());
-    if (rename_err != 0) {
-        std::cerr << "Failed to rename compacted file\n";
+    // More robust atomic rename simulation utilizing backup tracking
+    std::string backup_path = db_path_ + ".bak";
+    std::remove(backup_path.c_str());
+    
+    // Rename current to backup
+    if (std::rename(db_path_.c_str(), backup_path.c_str()) != 0) {
+        return false; // Backup failed, abort
     }
+
+    // Rename compact to current
+    if (std::rename(compact_file_path.c_str(), db_path_.c_str()) != 0) {
+        // Renaming failed, attempting rollback
+        std::rename(backup_path.c_str(), db_path_.c_str());
+        return false;
+    }
+
+    // Fully succeeded, remove safety backup
+    std::remove(backup_path.c_str());
 
     // Reopen data file
     data_file_.open(db_path_, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
