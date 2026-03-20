@@ -15,7 +15,7 @@ Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant
 
 ---
 
-## ⚡ Key Engineering Achievements
+## Key Engineering Achievements
 
 - **Zero-Allocation I/O Pipeline**: Architected a one-shot batched File I/O system minimizing expensive kernel context switches. Validated with a Zero-Allocation CRC32 Lookup Table (LUT) hashing strategy utilizing explicit memory addresses, avoiding all heap/`std::vector` allocations per query.
 - **Lock-Free Thread Safety**: Engineered a custom internal `SpinLock` strictly utilizing C++11 `std::atomic_flag` memory fences to guarantee 100% thread-safety across concurrent access without injecting POSIX `<mutex>` external constraints.
@@ -26,7 +26,7 @@ Built exclusively utilizing the **C++ Standard Library (STL) and POSIX-compliant
 
 ---
 
-## 🏗 Deep-Dive: Storage Architecture
+## Deep-Dive: Storage Architecture
 
 ### Append-Only Log Mechanics vs. B-Trees
 Traditional relational databases (B-Trees) utilize in-place updates, which critically degrade performance on rotational or slow media due to heavy random disk I/O penalties. **MiniDB treats the database natively as an infinite append-only log.** All operations—whether new insertions or overriding updates—are simply appended sequentially to the very end of the file.
@@ -49,7 +49,7 @@ Every stored attribute is strictly packed byte-by-byte into the file stream util
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Build Instructions
 
@@ -103,7 +103,7 @@ minidb> exit
 
 ---
 
-## 💻 Embed into your C++ Project
+## Embed into your C++ Project
 
 If you need a blazing-fast, lightweight NoSQL store dynamically bolted into your C++ application, initializing `MiniDB` takes three lines of code:
 
@@ -140,10 +140,10 @@ int main() {
 
 ---
 
-## 🤝 Contributions
+## Contributions
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Komal-ai417/minidb/issues).
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
