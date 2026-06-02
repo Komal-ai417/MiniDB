@@ -1,0 +1,23 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Compile Tests
+      run: g++ -std=c++11 -I./include src/MiniDB.cpp tests/test_minidb.cpp -o test_minidb
+
+    - name: Run Tests
+      run: ./test_minidb
+
+    - name: Compile CLI
+      run: g++ -std=c++11 -I./include src/MiniDB.cpp src/main.cpp -o minidb_cli
