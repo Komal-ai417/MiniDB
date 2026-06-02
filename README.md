@@ -147,5 +147,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ```text
 MIT License
-Copyright (c) 2026 Komal-ai417
+Copyright (c) 2026 Karyampudi Komal
 ```
