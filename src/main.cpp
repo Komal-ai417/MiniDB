@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 using namespace minidb;
 
@@ -10,6 +11,7 @@ void print_help() {
               << "  put <key> <value>\n"
               << "  get <key>\n"
               << "  del <key>\n"
+              << "  import <csv_filepath>\n"
               << "  compact\n"
               << "  exit (or quit)\n";
 }
@@ -39,6 +41,28 @@ int main() {
                 std::getline(iss >> std::ws, val);
                 if (db.Put(key, val, true)) std::cout << "OK\n";
                 else std::cout << "Error writing to database.\n";
+            } else if (cmd == "import") {
+                std::string filepath;
+                iss >> filepath;
+                std::ifstream csv(filepath);
+                if (!csv.is_open()) {
+                    std::cout << "Failed to open file: " << filepath << "\n";
+                } else {
+                    std::string line;
+                    int count = 0;
+                    while (std::getline(csv, line)) {
+                        if (line.empty()) continue;
+                        size_t pos = line.find(',');
+                        if (pos != std::string::npos) {
+                            std::string key = line.substr(0, pos);
+                            std::string val = line.substr(pos + 1);
+                            db.Put(key, val, false); // No sync per row for massive speedup
+                            count++;
+                        }
+                    }
+                    db.Sync(); // Sync once at the very end
+                    std::cout << "Imported " << count << " records successfully.\n";
+                }
             } else if (cmd == "get") {
                 std::string key;
                 iss >> key;
