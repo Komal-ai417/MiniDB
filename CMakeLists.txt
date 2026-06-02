@@ -25,3 +25,6 @@ enable_testing()
 add_executable(test_minidb tests/test_minidb.cpp)
 target_link_libraries(test_minidb PRIVATE minidb)
 add_test(NAME test_minidb COMMAND test_minidb)
+
+add_executable(benchmark_minidb tests/benchmark_minidb.cpp)
+target_link_libraries(benchmark_minidb PRIVATE minidb)

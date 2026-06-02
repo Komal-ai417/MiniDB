@@ -4,17 +4,27 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <array>
 
 namespace minidb {
 
 MiniDB::MiniDB(const std::string& db_path) : db_path_(db_path) {
-    // Ensure the file exists, create empty if not
-    std::ifstream check_file(db_path_.c_str());
-    if (!check_file.good()) {
-        std::ofstream create_file(db_path_.c_str(), std::ios::out | std::ios::binary);
-        create_file.close();
+    // Check if main file is missing but a backup exists (crash during Compact)
+    std::string backup_path = db_path_ + ".bak";
+    std::ifstream check_main(db_path_.c_str());
+    if (!check_main.good()) {
+        std::ifstream check_bak(backup_path.c_str());
+        if (check_bak.good()) {
+            check_bak.close();
+            std::rename(backup_path.c_str(), db_path_.c_str());
+            std::cerr << "Recovered database from backup after crash during compaction.\n";
+        } else {
+            // Neither exists, create a new file
+            std::ofstream create_file(db_path_.c_str(), std::ios::out | std::ios::binary);
+            create_file.close();
+        }
     }
-    check_file.close();
+    check_main.close();
 
     // Open file in read/write binary mode
     data_file_.open(db_path_, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
@@ -29,32 +39,31 @@ MiniDB::MiniDB(const std::string& db_path) : db_path_(db_path) {
 }
 
 MiniDB::~MiniDB() {
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (data_file_.is_open()) {
         data_file_.flush();
         data_file_.close();
     }
 }
 
-static const uint32_t* GetCRC32Table() {
-    static uint32_t table[256];
-    static bool initialized = false;
-    if (!initialized) {
+static const std::array<uint32_t, 256>& GetCRC32Table() {
+    static const std::array<uint32_t, 256> table = []() {
+        std::array<uint32_t, 256> t{};
         for (uint32_t i = 0; i < 256; i++) {
             uint32_t crc = i;
             for (uint32_t j = 0; j < 8; j++) {
                 crc = (crc & 1) ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
             }
-            table[i] = crc;
+            t[i] = crc;
         }
-        initialized = true;
-    }
+        return t;
+    }();
     return table;
 }
 
 uint32_t MiniDB::CalculateCRC32(const uint8_t* data, size_t length, uint32_t previous_crc) {
     uint32_t crc = ~previous_crc;
-    const uint32_t* table = GetCRC32Table();
+    const auto& table = GetCRC32Table();
     for (size_t i = 0; i < length; ++i) {
         crc = (crc >> 8) ^ table[(crc ^ data[i]) & 0xFF];
     }
@@ -70,22 +79,24 @@ bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool
     uint32_t key_len = static_cast<uint32_t>(key.length());
     uint32_t val_len = static_cast<uint32_t>(value.length());
 
-    // Minimize System Calls by building a one-shot buffer
+    // Minimize System Calls and Heap Allocations by using a reusable buffer
     size_t total_size = sizeof(RecordHeader) + key_len + val_len;
-    std::vector<char> buffer(total_size);
+    if (write_buffer_.size() < total_size) {
+        write_buffer_.resize(total_size);
+    }
     
-    RecordHeader* header = reinterpret_cast<RecordHeader*>(buffer.data());
+    RecordHeader* header = reinterpret_cast<RecordHeader*>(write_buffer_.data());
     header->magic = MAGIC_BYTES;
     header->timestamp = timestamp;
     header->tombstone = tombstone;
     header->key_len = key_len;
     header->val_len = val_len;
 
-    char* data_ptr = buffer.data() + sizeof(RecordHeader);
+    char* data_ptr = write_buffer_.data() + sizeof(RecordHeader);
     std::memcpy(data_ptr, key.data(), key_len);
     std::memcpy(data_ptr + key_len, value.data(), val_len);
 
-    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(buffer.data() + 8);
+    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(write_buffer_.data() + 8);
     header->checksum = CalculateCRC32(payload_start, total_size - 8);
 
     // Seek to end to append
@@ -94,14 +105,14 @@ bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool
     out_offset = data_file_.tellp();
 
     // Single write syscall
-    data_file_.write(buffer.data(), buffer.size());
+    data_file_.write(write_buffer_.data(), total_size);
     data_file_.flush();
 
     return data_file_.good();
 }
 
 bool MiniDB::Put(const std::string& key, const std::string& value) {
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
     std::streampos offset;
     if (AppendRecord(key, value, false, offset)) {
         key_dir_[key] = offset;
@@ -111,7 +122,7 @@ bool MiniDB::Put(const std::string& key, const std::string& value) {
 }
 
 bool MiniDB::Delete(const std::string& key) {
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (key_dir_.find(key) == key_dir_.end()) {
         return false; // Key not found
     }
@@ -126,7 +137,7 @@ bool MiniDB::Delete(const std::string& key) {
 }
 
 bool MiniDB::Get(const std::string& key, std::string& value) {
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
     auto it = key_dir_.find(key);
     if (it == key_dir_.end()) {
         return false;
@@ -145,11 +156,15 @@ bool MiniDB::Get(const std::string& key, std::string& value) {
         return false; // Corrupt record
     }
 
-    // Streamlined one-shot read for payload
-    std::string payload_data;
+    // Protect against OOM from corrupt records
+    if (header.key_len > 1024 * 1024 || header.val_len > 128 * 1024 * 1024) {
+        return false;
+    }
+
+    // Streamlined one-shot read for payload without zero-initialization overhead
     size_t var_len = header.key_len + header.val_len;
-    payload_data.resize(var_len);
-    if (!data_file_.read(&payload_data[0], var_len)) {
+    std::vector<char> payload_data(var_len);
+    if (!data_file_.read(payload_data.data(), var_len)) {
         return false;
     }
 
@@ -165,12 +180,12 @@ bool MiniDB::Get(const std::string& key, std::string& value) {
         return false; // Should not happen since we remove from key_dir_, but safe check
     }
 
-    value = payload_data.substr(header.key_len);
+    value.assign(payload_data.data() + header.key_len, header.val_len);
     return true;
 }
 
 bool MiniDB::Recover() {
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
     data_file_.clear();
     data_file_.seekg(0, std::ios::beg);
 
@@ -241,7 +256,7 @@ bool MiniDB::Compact() {
         return false;
     }
 
-    LockGuard<SpinLock> lock(db_mutex_);
+    std::lock_guard<std::mutex> lock(db_mutex_);
 
     // Iterate over active keys
     for (const auto& pair : key_dir_) {
@@ -255,24 +270,17 @@ bool MiniDB::Compact() {
         RecordHeader header;
         data_file_.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader));
         
-        // Skip key reading - we already have it! Oh wait, we need the exact bytes for the new file.
-        std::string read_key;
-        read_key.resize(header.key_len);
-        data_file_.read(&read_key[0], header.key_len);
-        
-        std::string read_val;
-        read_val.resize(header.val_len);
-        data_file_.read(&read_val[0], header.val_len);
-
-        // Optional: Re-calculate CRC/Timestamps or just copy raw bits.
-        // It's cleaner to reuse Write/Append logic, but to keep the old timestamp,
-        // we write the exact raw bits.
+        // Optimize compaction by reading and writing the variable part in one chunk
+        size_t var_len = header.key_len + header.val_len;
+        if (write_buffer_.size() < var_len) {
+            write_buffer_.resize(var_len);
+        }
+        data_file_.read(write_buffer_.data(), var_len);
         
         std::streampos new_offset = compact_file.tellp();
         
         compact_file.write(reinterpret_cast<const char*>(&header), sizeof(RecordHeader));
-        compact_file.write(read_key.data(), header.key_len);
-        compact_file.write(read_val.data(), header.val_len);
+        compact_file.write(write_buffer_.data(), var_len);
         
         temp_key_dir[key] = new_offset;
     }

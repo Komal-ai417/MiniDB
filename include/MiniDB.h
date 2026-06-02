@@ -5,30 +5,9 @@
 #include <fstream>
 #include <cstdint>
 #include <vector>
-#include <atomic>
+#include <mutex>
 
 namespace minidb {
-
-class SpinLock {
-    std::atomic_flag locked = ATOMIC_FLAG_INIT;
-public:
-    void lock() {
-        while (locked.test_and_set(std::memory_order_acquire)) { ; }
-    }
-    void unlock() {
-        locked.clear(std::memory_order_release);
-    }
-};
-
-template <typename T>
-class LockGuard {
-    T& mutex_;
-public:
-    explicit LockGuard(T& m) : mutex_(m) { mutex_.lock(); }
-    ~LockGuard() { mutex_.unlock(); }
-    LockGuard(const LockGuard&) = delete;
-    LockGuard& operator=(const LockGuard&) = delete;
-};
 
 class MiniDB {
 public:
@@ -95,8 +74,11 @@ private:
     // Hash Index mapping Key to its latest file offset
     std::unordered_map<std::string, std::streampos> key_dir_; 
 
-    // Custom lock implementing extreme zero-dependency thread-safety
-    SpinLock db_mutex_;
+    // Mutex for thread-safety (replaced SpinLock for better OS yielding during file I/O)
+    std::mutex db_mutex_;
+
+    // Reusable write buffer to avoid heap allocations on every AppendRecord
+    std::vector<char> write_buffer_;
 
     /**
      * @brief Recovers the hash index by reading the file sequentially on startup.
