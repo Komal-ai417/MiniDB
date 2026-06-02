@@ -81,11 +81,89 @@ void test_compaction() {
     std::cout << "[PASS] Log Compaction\n";
 }
 
+void test_variable_data() {
+    std::remove("test_variable.log");
+    {
+        MiniDB db("test_variable.log");
+        
+        // Empty key, empty value
+        assert(db.Put("", ""));
+        auto v1 = db.Get("");
+        assert(v1.has_value() && v1.value() == "");
+
+        // Empty key, normal value
+        assert(db.Put("", "value"));
+        v1 = db.Get("");
+        assert(v1.has_value() && v1.value() == "value");
+
+        // Normal key, empty value
+        assert(db.Put("empty_val", ""));
+        auto v2 = db.Get("empty_val");
+        assert(v2.has_value() && v2.value() == "");
+
+        // Null bytes in strings
+        std::string null_str("hello\0world", 11);
+        assert(db.Put("null_str", null_str));
+        auto v3 = db.Get("null_str");
+        assert(v3.has_value() && v3.value() == null_str);
+        
+        // Very large value (1 MB)
+        std::string large_val(1024 * 1024, 'x');
+        assert(db.Put("large", large_val));
+        auto v4 = db.Get("large");
+        assert(v4.has_value() && v4.value() == large_val);
+    }
+    std::cout << "[PASS] Variable data sizes & types\n";
+}
+
+void test_edge_cases() {
+    std::remove("test_edge.log");
+    {
+        MiniDB db("test_edge.log");
+        
+        // Get non-existent
+        assert(!db.Get("non_existent").has_value());
+
+        // Delete non-existent
+        assert(!db.Delete("non_existent"));
+
+        // Put then delete then get
+        assert(db.Put("to_delete", "val"));
+        assert(db.Delete("to_delete"));
+        assert(!db.Get("to_delete").has_value());
+
+        // Many deletes (compact should handle 100% tombstones)
+        for (int i = 0; i < 100; ++i) {
+            db.Put("k" + std::to_string(i), "v");
+            db.Delete("k" + std::to_string(i));
+        }
+        assert(db.Compact());
+        auto size = get_file_size("test_edge.log");
+        assert(size == 0); // All keys deleted, file should be completely empty
+    }
+    
+    // Simulate corrupt record/file
+    {
+        std::ofstream out("test_corrupt.log", std::ios::binary);
+        out << "random garbage data";
+        out.close();
+        
+        // Recover should fail gracefully on garbage
+        MiniDB db("test_corrupt.log");
+        assert(!db.Get("any").has_value());
+    }
+    std::remove("test_corrupt.log");
+
+    std::cout << "[PASS] Edge cases & corruption handling\n";
+}
+
 int main() {
     try {
         test_crud();
         test_recovery();
         test_compaction();
+        test_variable_data();
+        test_edge_cases();
         std::cout << "\nAll test cases passed successfully.\n";
     } catch(const std::exception& e) {
         std::cerr << "Test failed with exception: " << e.what() << "\n";
