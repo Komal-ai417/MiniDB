@@ -18,18 +18,19 @@ void test_crud() {
         assert(db.Put("key1", "value1"));
         assert(db.Put("key2", "value2"));
         
-        std::string val1;
-        assert(db.Get("key1", val1));
-        assert(val1 == "value1");
+        auto val1 = db.Get("key1");
+        assert(val1.has_value());
+        assert(val1.value() == "value1");
         
         // Update
         assert(db.Put("key1", "value1_updated"));
-        assert(db.Get("key1", val1));
-        assert(val1 == "value1_updated");
+        val1 = db.Get("key1");
+        assert(val1.has_value());
+        assert(val1.value() == "value1_updated");
 
         // Delete
         assert(db.Delete("key1"));
-        assert(!db.Get("key1", val1));
+        assert(!db.Get("key1").has_value());
         assert(!db.Delete("key1")); // Double delete
     }
     std::cout << "[PASS] CRUD operations\n";
@@ -47,10 +48,10 @@ void test_recovery() {
     {
         // Recover state from file
         MiniDB db("test_recovery.log");
-        std::string val;
-        assert(!db.Get("r1", val)); // Was deleted
-        assert(db.Get("r2", val));
-        assert(val == "data2");
+        assert(!db.Get("r1").has_value()); // Was deleted
+        auto val2 = db.Get("r2");
+        assert(val2.has_value());
+        assert(val2.value() == "data2");
     }
     std::cout << "[PASS] Crash recovery & persistence\n";
 }
@@ -72,10 +73,10 @@ void test_compaction() {
         assert(size_after < size_before); // Log should shrink
         
         // Data should remain intact
-        std::string val;
-        assert(db.Get("c2", val));
-        assert(val == "data2_99");
-        assert(!db.Get("c1", val)); // c1 was deleted
+        auto val = db.Get("c2");
+        assert(val.has_value());
+        assert(val.value() == "data2_99");
+        assert(!db.Get("c1").has_value()); // c1 was deleted
     }
     std::cout << "[PASS] Log Compaction\n";
 }

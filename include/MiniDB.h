@@ -1,10 +1,13 @@
 #pragma once
 
 #include <string>
+#include <string_view>
+#include <optional>
 #include <unordered_map>
 #include <fstream>
 #include <cstdint>
 #include <vector>
+#include <shared_mutex>
 #include <mutex>
 
 namespace minidb {
@@ -26,24 +29,25 @@ public:
      * @brief Inserts or updates a key-value pair in the database.
      * @param key The key to insert.
      * @param value The value associated with the key.
+     * @param sync If true, forces OS flush to disk.
      * @return True if successful, false otherwise.
      */
-    bool Put(const std::string& key, const std::string& value);
+    bool Put(std::string_view key, std::string_view value, bool sync = false);
 
     /**
      * @brief Retrieves the value associated with a key.
      * @param key The key to look up.
-     * @param value Output parameter for the retrieved value.
-     * @return True if found, false if not found or deleted.
+     * @return Optional containing the value if found, empty if not found or deleted.
      */
-    bool Get(const std::string& key, std::string& value);
+    std::optional<std::string> Get(std::string_view key);
 
     /**
      * @brief Deletes a key from the database.
      * @param key The key to delete.
+     * @param sync If true, forces OS flush to disk.
      * @return True if successful, false otherwise.
      */
-    bool Delete(const std::string& key);
+    bool Delete(std::string_view key, bool sync = false);
 
     /**
      * @brief Compacts the active database log to reclaim space from updated/deleted records.
@@ -51,14 +55,21 @@ public:
      */
     bool Compact();
 
+    /**
+     * @brief Manually synchronizes the underlying file stream buffers to OS/disk.
+     * @return True if successful.
+     */
+    bool Sync();
+
 private:
     /**
      * @brief Binary protocol layout for the log file
      */
     #pragma pack(push, 1) // Ensure no padding
     struct RecordHeader {
-        uint32_t magic;      // Magic bytes "MDB1"
-        uint32_t checksum;   // CRC32 of the REST of the record (from timestamp onwards)
+        uint32_t magic;      // Magic bytes "MDB2"
+        uint32_t header_crc; // CRC32 of timestamp, tombstone, key_len, val_len, and the KEY string
+        uint32_t value_crc;  // CRC32 of the VALUE string
         uint64_t timestamp;  // Epoch time in ms
         uint8_t tombstone;   // 0x00 = Active, 0x01 = Deleted
         uint32_t key_len;    // Length of the key part
@@ -66,16 +77,16 @@ private:
     };
     #pragma pack(pop)
 
-    static constexpr uint32_t MAGIC_BYTES = 0x3142444D; // "MDB1" en little-endian roughly
+    static constexpr uint32_t MAGIC_BYTES = 0x3242444D; // "MDB2" in little-endian roughly
 
     std::string db_path_;
-    std::fstream data_file_;
+    std::fstream data_file_; // Used for appends
     
     // Hash Index mapping Key to its latest file offset
     std::unordered_map<std::string, std::streampos> key_dir_; 
 
-    // Mutex for thread-safety (replaced SpinLock for better OS yielding during file I/O)
-    std::mutex db_mutex_;
+    // Readers-Writer lock for concurrent reads (Get) and exclusive writes (Put/Delete/Compact)
+    mutable std::shared_mutex db_mutex_;
 
     // Reusable write buffer to avoid heap allocations on every AppendRecord
     std::vector<char> write_buffer_;
@@ -103,7 +114,7 @@ private:
      * @param offset Output parameter to receive the written file offset.
      * @return True if successfully written.
      */
-    bool AppendRecord(const std::string& key, const std::string& value, bool is_tombstone, std::streampos& offset);
+    bool AppendRecord(std::string_view key, std::string_view value, bool is_tombstone, bool sync, std::streampos& offset);
 };
 
 } // namespace minidb

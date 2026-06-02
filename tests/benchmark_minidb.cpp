@@ -23,8 +23,7 @@ void stress_test_sequential() {
         auto end_put = std::chrono::high_resolution_clock::now();
         
         for (int i = 0; i < NUM_OPS; ++i) {
-            std::string val;
-            db.Get("key" + std::to_string(i), val);
+            db.Get("key" + std::to_string(i));
         }
         auto end_get = std::chrono::high_resolution_clock::now();
 
@@ -62,8 +61,7 @@ void stress_test_concurrent() {
                 }
                 for (int i = 0; i < OPS_PER_THREAD; ++i) {
                     std::string key = "t" + std::to_string(t) + "_k" + std::to_string(i);
-                    std::string val;
-                    if (!db.Get(key, val)) failed_gets++;
+                    if (!db.Get(key).has_value()) failed_gets++;
                 }
             });
         }

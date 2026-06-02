@@ -37,17 +37,18 @@ int main() {
                 std::string key, val;
                 iss >> key;
                 std::getline(iss >> std::ws, val);
-                if (db.Put(key, val)) std::cout << "OK\n";
+                if (db.Put(key, val, true)) std::cout << "OK\n";
                 else std::cout << "Error writing to database.\n";
             } else if (cmd == "get") {
-                std::string key, val;
+                std::string key;
                 iss >> key;
-                if (db.Get(key, val)) std::cout << val << "\n";
+                auto val = db.Get(key);
+                if (val.has_value()) std::cout << val.value() << "\n";
                 else std::cout << "(not found)\n";
             } else if (cmd == "del") {
                 std::string key;
                 iss >> key;
-                if (db.Delete(key)) std::cout << "OK\n";
+                if (db.Delete(key, true)) std::cout << "OK\n";
                 else std::cout << "(not found)\n";
             } else if (cmd == "compact") {
                 if (db.Compact()) std::cout << "Compaction successful.\n";

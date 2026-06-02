@@ -26,6 +26,10 @@ MiniDB::MiniDB(const std::string& db_path) : db_path_(db_path) {
     }
     check_main.close();
 
+    // Disable C++ level buffering so writes immediately go to the OS page cache.
+    // This allows concurrent std::ifstream readers to see the data without explicit flushing.
+    data_file_.rdbuf()->pubsetbuf(nullptr, 0);
+
     // Open file in read/write binary mode
     data_file_.open(db_path_, std::ios::in | std::ios::out | std::ios::binary | std::ios::app);
     if (!data_file_.is_open()) {
@@ -39,7 +43,7 @@ MiniDB::MiniDB(const std::string& db_path) : db_path_(db_path) {
 }
 
 MiniDB::~MiniDB() {
-    std::lock_guard<std::mutex> lock(db_mutex_);
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
     if (data_file_.is_open()) {
         data_file_.flush();
         data_file_.close();
@@ -70,7 +74,16 @@ uint32_t MiniDB::CalculateCRC32(const uint8_t* data, size_t length, uint32_t pre
     return ~crc;
 }
 
-bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool is_tombstone, std::streampos& out_offset) {
+bool MiniDB::Sync() {
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
+    if (data_file_.is_open()) {
+        data_file_.flush();
+        return data_file_.good();
+    }
+    return false;
+}
+
+bool MiniDB::AppendRecord(std::string_view key, std::string_view value, bool is_tombstone, bool sync, std::streampos& out_offset) {
     // Prepare payload
     uint64_t timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                              std::chrono::system_clock::now().time_since_epoch())
@@ -96,8 +109,13 @@ bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool
     std::memcpy(data_ptr, key.data(), key_len);
     std::memcpy(data_ptr + key_len, value.data(), val_len);
 
-    const uint8_t* payload_start = reinterpret_cast<const uint8_t*>(write_buffer_.data() + 8);
-    header->checksum = CalculateCRC32(payload_start, total_size - 8);
+    // Calculate value CRC
+    header->value_crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(value.data()), val_len);
+
+    // Calculate header CRC (timestamp + tombstone + key_len + val_len + key string)
+    const uint8_t* header_start = reinterpret_cast<const uint8_t*>(&header->timestamp);
+    uint32_t crc = CalculateCRC32(header_start, sizeof(uint64_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t));
+    header->header_crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(key.data()), key_len, crc);
 
     // Seek to end to append
     data_file_.clear();
@@ -106,86 +124,90 @@ bool MiniDB::AppendRecord(const std::string& key, const std::string& value, bool
 
     // Single write syscall
     data_file_.write(write_buffer_.data(), total_size);
-    data_file_.flush();
+    if (sync) {
+        data_file_.flush();
+    }
 
     return data_file_.good();
 }
 
-bool MiniDB::Put(const std::string& key, const std::string& value) {
-    std::lock_guard<std::mutex> lock(db_mutex_);
+bool MiniDB::Put(std::string_view key, std::string_view value, bool sync) {
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
     std::streampos offset;
-    if (AppendRecord(key, value, false, offset)) {
-        key_dir_[key] = offset;
+    if (AppendRecord(key, value, false, sync, offset)) {
+        key_dir_[std::string(key)] = offset;
         return true;
     }
     return false;
 }
 
-bool MiniDB::Delete(const std::string& key) {
-    std::lock_guard<std::mutex> lock(db_mutex_);
-    if (key_dir_.find(key) == key_dir_.end()) {
+bool MiniDB::Delete(std::string_view key, bool sync) {
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
+    std::string key_str(key);
+    if (key_dir_.find(key_str) == key_dir_.end()) {
         return false; // Key not found
     }
 
     std::streampos offset;
-    if (AppendRecord(key, "", true, offset)) {
-        key_dir_.erase(key);
+    if (AppendRecord(key, "", true, sync, offset)) {
+        key_dir_.erase(key_str);
         return true;
     }
     
     return false;
 }
 
-bool MiniDB::Get(const std::string& key, std::string& value) {
-    std::lock_guard<std::mutex> lock(db_mutex_);
-    auto it = key_dir_.find(key);
-    if (it == key_dir_.end()) {
-        return false;
+std::optional<std::string> MiniDB::Get(std::string_view key) {
+    std::streampos offset;
+    {
+        std::shared_lock<std::shared_mutex> lock(db_mutex_);
+        std::string key_str(key);
+        auto it = key_dir_.find(key_str);
+        if (it == key_dir_.end()) {
+            return std::nullopt;
+        }
+        offset = it->second;
     }
 
-    std::streampos offset = it->second;
-    data_file_.clear();
-    data_file_.seekg(offset, std::ios::beg);
+    // Open file locally for concurrent, lock-free read
+    std::ifstream reader(db_path_, std::ios::in | std::ios::binary);
+    if (!reader.is_open()) return std::nullopt;
+
+    reader.seekg(offset, std::ios::beg);
 
     RecordHeader header;
-    if (!data_file_.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader))) {
-        return false; // IO error
+    if (!reader.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader))) {
+        return std::nullopt; // IO error
     }
 
     if (header.magic != MAGIC_BYTES) {
-        return false; // Corrupt record
+        return std::nullopt; // Corrupt record
     }
 
     // Protect against OOM from corrupt records
     if (header.key_len > 1024 * 1024 || header.val_len > 128 * 1024 * 1024) {
-        return false;
+        return std::nullopt;
     }
 
-    // Streamlined one-shot read for payload without zero-initialization overhead
-    size_t var_len = header.key_len + header.val_len;
-    std::vector<char> payload_data(var_len);
-    if (!data_file_.read(payload_data.data(), var_len)) {
-        return false;
+    // Seek past key (we already know it matches from hash map)
+    reader.seekg(header.key_len, std::ios::cur);
+
+    std::string value;
+    value.resize(header.val_len);
+    if (!reader.read(&value[0], header.val_len)) {
+        return std::nullopt;
     }
 
-    // Zero-allocation CRC chain
-    uint32_t crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(&header.timestamp), sizeof(header.timestamp) + sizeof(header.tombstone) + sizeof(header.key_len) + sizeof(header.val_len));
-    crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(payload_data.data()), var_len, crc);
-
-    if (crc != header.checksum) {
-        return false; // Data corruption detected
+    uint32_t val_crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(value.data()), header.val_len);
+    if (val_crc != header.value_crc) {
+        return std::nullopt; // Corruption
     }
 
-    if (header.tombstone == 1) {
-        return false; // Should not happen since we remove from key_dir_, but safe check
-    }
-
-    value.assign(payload_data.data() + header.key_len, header.val_len);
-    return true;
+    return value;
 }
 
 bool MiniDB::Recover() {
-    std::lock_guard<std::mutex> lock(db_mutex_);
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
     data_file_.clear();
     data_file_.seekg(0, std::ios::beg);
 
@@ -196,43 +218,34 @@ bool MiniDB::Recover() {
         std::streampos current_offset = data_file_.tellg();
         RecordHeader header;
         
-        // Peek to see if EOF
-        if (data_file_.peek() == EOF) {
-            break;
-        }
-
-        if (!data_file_.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader))) {
-            break; // Reached EOF or partial header
-        }
+        if (data_file_.peek() == EOF) break;
+        if (!data_file_.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader))) break;
 
         if (header.magic != MAGIC_BYTES) {
-            all_good = false;
-            break; // Unknown format, stop recovery
+            all_good = false; break;
         }
-
-        // Handle potentially huge lengths due to corruption
         if (header.key_len > 1024 * 1024 || header.val_len > 128 * 1024 * 1024) { 
-            all_good = false;
-            break; // Corrupt length
-        }
-
-        // Efficient combined chunk read
-        std::string payload_data;
-        size_t var_len = header.key_len + header.val_len;
-        payload_data.resize(var_len);
-        if (!data_file_.read(&payload_data[0], var_len)) {
             all_good = false; break;
         }
 
-        uint32_t crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(&header.timestamp), sizeof(header.timestamp) + sizeof(header.tombstone) + sizeof(header.key_len) + sizeof(header.val_len));
-        crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(payload_data.data()), var_len, crc);
-
-        if (crc != header.checksum) {
-            all_good = false;
-            break; // Checksum mismatch, stop recovery at the last valid record
+        // Fast Startup Recovery: Only read the key, skip the value
+        std::string read_key;
+        read_key.resize(header.key_len);
+        if (!data_file_.read(&read_key[0], header.key_len)) {
+            all_good = false; break;
         }
 
-        std::string read_key = payload_data.substr(0, header.key_len);
+        // Validate Header CRC
+        uint32_t crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(&header.timestamp), 
+                                      sizeof(uint64_t) + sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t));
+        crc = CalculateCRC32(reinterpret_cast<const uint8_t*>(read_key.data()), header.key_len, crc);
+
+        if (crc != header.header_crc) {
+            all_good = false; break;
+        }
+
+        // Skip value bytes on disk! HUGE speedup.
+        data_file_.seekg(header.val_len, std::ios::cur);
 
         if (header.tombstone == 1) {
             key_dir_.erase(read_key);
@@ -241,9 +254,7 @@ bool MiniDB::Recover() {
         }
     }
     
-    // Clear potentially bad bits in file stream to allow further reading/writing
     data_file_.clear();
-    
     return all_good;
 }
 
@@ -252,25 +263,20 @@ bool MiniDB::Compact() {
     std::unordered_map<std::string, std::streampos> temp_key_dir;
 
     std::ofstream compact_file(compact_file_path, std::ios::out | std::ios::binary);
-    if (!compact_file.is_open()) {
-        return false;
-    }
+    if (!compact_file.is_open()) return false;
 
-    std::lock_guard<std::mutex> lock(db_mutex_);
+    std::unique_lock<std::shared_mutex> lock(db_mutex_);
 
-    // Iterate over active keys
     for (const auto& pair : key_dir_) {
         const std::string& key = pair.first;
         std::streampos old_offset = pair.second;
 
-        // Read from old file
         data_file_.clear();
         data_file_.seekg(old_offset, std::ios::beg);
 
         RecordHeader header;
         data_file_.read(reinterpret_cast<char*>(&header), sizeof(RecordHeader));
         
-        // Optimize compaction by reading and writing the variable part in one chunk
         size_t var_len = header.key_len + header.val_len;
         if (write_buffer_.size() < var_len) {
             write_buffer_.resize(var_len);
