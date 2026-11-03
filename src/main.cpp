@@ -54,14 +54,14 @@ int main() {
                 if (!csv.is_open()) {
                     std::cout << "Failed to open file: " << filepath << "\n";
                 } else {
-                    std::string line;
+                    std::string csv_line;
                     int count = 0;
-                    while (std::getline(csv, line)) {
-                        if (line.empty()) continue;
-                        size_t pos = line.find(',');
+                    while (std::getline(csv, csv_line)) {
+                        if (csv_line.empty()) continue;
+                        size_t pos = csv_line.find(',');
                         if (pos != std::string::npos) {
-                            std::string key = line.substr(0, pos);
-                            std::string val = line.substr(pos + 1);
+                            std::string key = csv_line.substr(0, pos);
+                            std::string val = csv_line.substr(pos + 1);
                             db.Put(key, val, false); // No sync per row for massive speedup
                             count++;
                         }

@@ -66,9 +66,9 @@ void test_compaction() {
         }
         db.Delete("c1");
         
-        auto size_before = get_file_size("test_compact.log");
+        [[maybe_unused]] auto size_before = get_file_size("test_compact.log");
         assert(db.Compact());
-        auto size_after = get_file_size("test_compact.log");
+        [[maybe_unused]] auto size_after = get_file_size("test_compact.log");
         
         assert(size_after < size_before); // Log should shrink
         
@@ -138,7 +138,7 @@ void test_edge_cases() {
             db.Delete("k" + std::to_string(i));
         }
         assert(db.Compact());
-        auto size = get_file_size("test_edge.log");
+        [[maybe_unused]] auto size = get_file_size("test_edge.log");
         assert(size == 0); // All keys deleted, file should be completely empty
     }
     
@@ -212,7 +212,7 @@ void test_concurrent_compact_read() {
         }
         
         // Run concurrent reads while compacting
-        bool read_ok = true;
+        [[maybe_unused]] bool read_ok = true;
         
         // Compact in current thread
         assert(db.Compact());
